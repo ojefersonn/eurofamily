@@ -1,0 +1,59 @@
+# Publica o Guia EuroFamily no GitHub Pages.
+# A fonte é o arquivo index.html da pasta Guia/site no Google Drive (compartilhado por link).
+# Roda sozinho a cada 30 minutos e também pelo botão "Run workflow" na aba Actions.
+name: Publicar guia
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17,47 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Baixar a versão atual do guia no Google Drive
+        id: baixar
+        env:
+          LINK_DRIVE: "https://drive.google.com/file/d/1dj4InfHsJVhzg3R4JA2HBdfJnNSdM6a0/view?usp=drive_link"
+        run: |
+          mkdir site
+          ID=$(echo "$LINK_DRIVE" | sed -E 's#.*/d/([^/?]+).*#\1#')
+          curl -sSL -o site/index.html "https://drive.usercontent.google.com/download?id=${ID}&export=download&confirm=t"
+          if ! grep -q "Guia EuroFamily" site/index.html; then
+            echo "O arquivo baixado do Drive não é o guia. Confira o compartilhamento do index.html."
+            head -c 300 site/index.html
+            exit 1
+          fi
+          touch site/.nojekyll
+          mkdir -p site/louvre && cp site/index.html site/louvre/index.html
+          URL_SITE="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          if [ "${{ github.event_name }}" = "schedule" ] && curl -sSL -o atual.html "$URL_SITE" && cmp -s atual.html site/index.html; then
+            echo "Nada mudou desde a última publicação."
+            echo "mudou=nao" >> "$GITHUB_OUTPUT"
+          else
+            echo "mudou=sim" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preparar o pacote do site
+        if: steps.baixar.outputs.mudou == 'sim'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publicar no GitHub Pages
+        if: steps.baixar.outputs.mudou == 'sim'
+        id: deploy
+        uses: actions/deploy-pages@v4
